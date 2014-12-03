@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Path Editing</title>
+    <link rel="stylesheet" href="plugins/paperjs/css/style.css">
+    <script type="text/javascript" src="plugins/paperjs/dist/paper-full.js"></script>
+    <script type="text/javascript" src="plugins/jquery/jquery-2.1.1.min.js"></script>
+    <script type="text/paperscript" canvas="canvas">
+    
+        var $image = $('#image');
+        var $image_path = $('#image_path');
+        $image_path.change(function() {
+            if (window.File && window.FileReader && window.FileList && window.Blob) {
+                var input = $('#image_path').get(0);
+                console.log(input);
+                var file = input.files[0];
+                console.log(file);
+                var fr = new FileReader();
+                fr.readAsDataURL(file);
+
+                fr.onloadend = function() {
+                    var img = fr.result;
+                    $image.attr('src',img);
+                    project.clear();
+                    view.viewSize.height = $image.height();
+                    view.viewSize.width = $image.width();
+                }
+            } else {
+                alert('The File APIs are not fully supported in this browser.');
+            }
+        });
+        
+        var $shapes_path = $('#shapes_path');
+        $shapes_path.change(function() {
+            if (window.File && window.FileReader && window.FileList && window.Blob) {
+                project.clear();
+                var input = $('#shapes_path').get(0);
+                console.log(input);
+                var file = input.files[0];
+                console.log(file);
+                var fr = new FileReader();
+                fr.readAsText(file);
+
+                fr.onloadend = function() {
+                    var txt = fr.result;
+                    loadFromData(JSON.parse(txt));
+                }
+            } else {
+                alert('The File APIs are not fully supported in this browser.');
+            }
+        });
+        
+        
+        
+        var $drag_drop = $('#drag_drop');
+        $(document).keydown(function(e) {
+            var offset = $drag_drop.offset();
+            switch(e.which) {
+                case 37:
+                    offset.left += 20;
+                break;
+
+                case 38: // up
+                    offset.top += 20;
+                break;
+
+                case 39: // right
+                    offset.left -= 20;
+                break;
+
+                case 40: // down
+                    offset.top -= 20;
+                    
+                case 46:
+                    var pathsToDelete = project.getItems({visible: true, selected: true, class: Path});
+                    if (pathsToDelete.length > 0) {
+                        pathsToDelete[0].remove()
+                    }
+                break;
+
+                default: return; // exit this handler for other keys
+            }
+            $drag_drop.offset(offset); 
+            e.preventDefault(); // prevent the default action (scroll / move caret)
+        });
+        
+        $('#save_shapes').click(function() {
+            var items = project.getItems({visible: true, class: Path});
+            var res = [];
+            for (var i = 0; i < items.length; i++) {
+                var item = [];
+                for (var j = 0; j < items[i].segments.length; j++) {
+                    item.push({'x': items[i].segments[j].point.x, 'y': items[i].segments[j].point.y});
+                }
+                res.push(item);
+            }
+            
+            var str = JSON.stringify(res);
+            download('locations.json', str);
+        });
+        
+        var $add_remove_bg_color = $('#add_remove_bg_color');
+        var isColorized = true;
+        $add_remove_bg_color.click(function() {
+            isColorized = !isColorized;
+            setAllAlpha(getCurrentAlpha());
+        });
+        
+        function getCurrentAlpha() {
+            return isColorized ? 0.25 : 0
+        }
+        
+        function download(filename, text) {
+          var pom = document.createElement('a');
+          pom.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+          pom.setAttribute('download', filename);
+          pom.click();
+        }
+
+        var $container = $('#container');
+        view.viewSize.height = $container.height();
+        view.viewSize.width = $container.width();
+
+        var values = {
+            paths: 0,
+            minPoints: 5,
+            maxPoints: 15,
+            minRadius: 30,
+            maxRadius: 90
+        };
+
+        var hitOptions = {
+            segments: true,
+            stroke: true,
+            fill: true,
+            tolerance: 5
+        };
+
+        var radiusDelta = values.maxRadius - values.minRadius;
+        var pointsDelta = values.maxPoints - values.minPoints;
+        for (var i = 0; i < values.paths; i++) {
+            var radius = values.minRadius + Math.random() * radiusDelta;
+            var points = values.minPoints + Math.floor(Math.random() * pointsDelta);
+            var path = createBlob(view.size * Point.random(), radius, points);
+        }
+
+        function createBlob(center, maxRadius, points) {
+            var path = new Path();
+            path.closed = true;
+            for (var i = 0; i < points; i++) {
+                var delta = new Point({
+                    length: (maxRadius * 0.5) + (Math.random() * maxRadius * 0.5),
+                    angle: (360 / points) * i
+                });
+                path.add(center + delta);
+            }
+            randomizePath(path);
+            
+            // path.smooth();
+            return path;
+        }
+        
+        function randomizePath(path) {
+            var lightness = (Math.random() - 0.5) * 0.4 + 0.4;
+            var hue = Math.random() * 360;
+            path.fillColor = { hue: hue, saturation: 1, lightness: lightness, alpha: getCurrentAlpha() };
+            path.strokeColor = 'black';
+        }
+        
+        
+        function setAllAlpha(alpha) {
+            var items = project.getItems({visible: true, selected: false, class: Path});
+            for (var i = 0; i < items.length; i++) {
+                items[i].fillColor.alpha = alpha;
+            }
+        }
+        
+        function loadFromData(data) {
+            for (var i = 0; i < data.length; i++) {
+                var path = new Path();
+                path.closed = true;
+                for (var j = 0; j < data[i].length; j++) {
+                    path.add(data[i][j]);
+                }
+                randomizePath(path)
+            }
+        }
+
+        var segment, path;
+        function onMouseDown(event) {
+            segment = path = null;
+            var hitResult = project.hitTest(event.point, hitOptions);
+
+            if (event.modifiers.shift) {
+                if (hitResult.type == 'segment') {
+                    hitResult.segment.remove();
+                }
+                return;
+            }
+
+            if (hitResult) {
+                path = hitResult.item;
+                if (hitResult.type == 'segment') {
+                    segment = hitResult.segment;
+                } else if (hitResult.type == 'stroke') {
+                    var location = hitResult.location;
+                    segment = path.insert(location.index + 1, event.point);
+                    // path.smooth();
+                }
+                hitResult.item.bringToFront();
+            } else {
+                if (event.event.ctrlKey) {
+                    createBlob(event.point, 20, 3);
+                }
+            }
+        }
+
+        function onMouseMove(event) {
+            var hitResult = project.hitTest(event.point, hitOptions);
+            project.activeLayer.selected = false;
+            if (hitResult && hitResult.item)
+                hitResult.item.selected = true;
+        }
+
+        function onMouseDrag(event) {
+            if (segment) {
+                segment.point = event.point;
+                
+                // Finding close points
+                var items = project.getItems({visible: true, selected: false, class: Path});
+                var res = [];
+                for (var i = 0; i < items.length; i++) {
+                    var item = [];
+                    for (var j = 0; j < items[i].segments.length; j++) {
+                        var point = items[i].segments[j].point;
+                        if (Math.sqrt((point.x - segment.point.x) * (point.x - segment.point.x) + (point.y - segment.point.y) * (point.y - segment.point.y)) < 5) {
+                            segment.point = point;
+                            return;
+                        }
+                    }
+                    res.push(item);
+                }
+                
+                //console.log(segment.point);
+                // path.smooth();
+            } else if (path) {
+                path.position += event.delta;
+            }
+        }
+    </script>
+</head>
+<body style="background:black;" oncontextmenu="return false;">
+    <div id="container" style="position: fixed; top: 0px; left: 0px; right: 300px; bottom: 0px;">
+        <div id="drag_drop" style="position: absolute;">
+            <img id="image" style="position: absolute;" />
+            <canvas id="canvas" style="position: absolute;"></canvas>
+        </div>
+    </div>
+    <div style="position: fixed; top: 0px; width: 300px; right: 0px; bottom: 0px; background-color: white;">
+        Mouse down + ctrl: creates new shape.
+        <br/>
+        Mouse down + shift: deletes edge.
+        <br/>
+        Delete key: delete whole object
+        <br/>
+        Arrow keys: move image
+        <br/>
+        Load new file:
+        <input type="file" id="image_path" />
+        <br/>
+        Load shapes:
+        <input type="file" id="shapes_path" />
+        <br/>
+        <input type="button" id="save_shapes" value="Save shapes" />
+        <br/>
+        <input type="button" id="add_remove_bg_color" value="Add / remove background color" />
+        <br/>
+        
+        
+    </div>
+</body>
+</html>
